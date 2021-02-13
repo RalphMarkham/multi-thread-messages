@@ -168,9 +168,11 @@ public class InterviewSolution {
             public void run() {
                 while(!this.isEmpty()) {
                     this.poll().run();
-                    if (this.isEmpty()) {
-                        synchronized (mappedTasks) {
-                            mappedTasks.remove(key);
+                    synchronized (this) {
+                        if (this.isEmpty()) {
+                            synchronized (mappedTasks) {
+                                mappedTasks.remove(key);
+                            }
                         }
                     }
                 }
