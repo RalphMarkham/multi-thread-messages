@@ -10,10 +10,4 @@ and attempts to retrieve the corresponding `Queue`, if the queue exists, the `Co
 a new instance of the inner class `TaskQueue`, a `Runnable` `LinkedList` is created and the `Consumer` is added, 
 before submitting the new instance of `TaskQueue` to be executed on the delegate `ExecutorService`.
 
-This implementation is not something I would suggest maintaining, or building on. A production level solution 
-would require a properly extending the `ExecutorService` interface in a way that properly supports past, current, and 
-future concurrency api's. Extended `ExecutorService` interface and builder pattern for creating its instance.
-
-
-
-
+Fixed ugly hack, using `CompletableFuture<Void>`.

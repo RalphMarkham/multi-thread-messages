@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,10 +25,12 @@ public class InterviewSolution {
         FixedOrderedExecutor<String> es = new FixedOrderedExecutor<>(threads);
 
         try {
-            Files.lines(Paths.get(path))
-                    .forEach(l -> {
+            @SuppressWarnings("rawtypes")
+            CompletableFuture[] futures = Files.lines(Paths.get(path))
+                    .map(l -> {
                         int firstIndx = l.indexOf('|');
                         int lastIndx = l.lastIndexOf('|');
+                        CompletableFuture<Void> cf = CompletableFuture.completedFuture(null);
                         if(firstIndx > -1 && lastIndx > firstIndx) {
                             if (firstIndx == 0) {
                                 try {
@@ -36,23 +39,20 @@ public class InterviewSolution {
                                     e.printStackTrace();
                                 }
                             } else {
-                                es.execute( new Consumer(l, firstIndx, lastIndx), l.substring(0,firstIndx));
+                                cf = es.submit(l.substring(0,firstIndx), new Consumer(l, firstIndx, lastIndx));
                             }
                         }
-                    });
+                        return cf;
+                    })
+                    .toArray(CompletableFuture[]::new);
+
+            CompletableFuture.allOf(futures).join();
 
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            es.shutdown();
         }
-        while (es.isRunningTasks()) {
-            try {
-                //noinspection BusyWait
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-        es.shutdown();
     }
 
     private static void usage() {
@@ -114,21 +114,41 @@ public class InterviewSolution {
             delegate = Executors.newFixedThreadPool(threads);
         }
 
-        public void execute(Runnable command, K key) {
+        public CompletableFuture<Void> submit(K key, Runnable runnable) {
+            RunnableCompletableFuture run = new RunnableCompletableFuture(runnable, new CompletableFuture<>());
             synchronized (mappedTasks) {
                 Queue<Runnable> queue = mappedTasks.get(key);
                 if (queue != null) {
-                    queue.add(command);
+                    queue.add(run);
                 } else {
-                    TaskQueue tq = new TaskQueue(key, command);
+                    TaskQueue tq = new TaskQueue(key, run);
                     mappedTasks.put(key, tq);
                     delegate.execute(tq);
                 }
             }
+            return run.cf;
         }
 
-        public boolean isRunningTasks() {
-            return mappedTasks.size() != 0;
+        private static class RunnableCompletableFuture implements Runnable {
+            private final Runnable r;
+            private final CompletableFuture<Void> cf;
+
+            public RunnableCompletableFuture(Runnable r, CompletableFuture<Void> cf) {
+                this.r = r;
+                this.cf = cf;
+            }
+
+            @Override
+            public void run() {
+                if (r != null && cf != null) {
+                    try {
+                        r.run();
+                        cf.complete(null);
+                    } catch (Throwable ex) {
+                        cf.obtrudeException(ex);
+                    }
+                }
+            }
         }
 
         @Override
