@@ -24,7 +24,11 @@ class InterviewSolutionTest {
 
     @Test
     void main() {
-        InterviewSolution.main(new String[]{"5","multi_thread_messages.txt"});
+        // How long until {"5","multi_thread_messages.txt"} is recognized as a literal String[] ?
+        // so I can do InterviewSolution.main({"5","multi_thread_messages.txt"});
+        // instead of InterviewSolution.main(new String[] {"5","multi_thread_messages.txt"});
+        String[] args = {"5","multi_thread_messages.txt"};
+        InterviewSolution.main(args);
 
         long count = outContent.toString()
                 .lines()

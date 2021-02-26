@@ -180,15 +180,18 @@ public class InterviewSolution {
                     // Retrieve, remove, and run the head of the list
                     this.poll().run();
 
-                    try {
-                        lock.lock();
+                    // Optimize use of lock
+                    if (this.size() < 1) {
                         // Make sure we still have a Runnable to run,
                         // otherwise remove this list from mappedTasks
-                        if (this.isEmpty()) {
-                            mappedTasks.remove(key);
+                        try {
+                            lock.lock();
+                            if (this.isEmpty()) {
+                                mappedTasks.remove(key);
+                            }
+                        } finally {
+                            lock.unlock();
                         }
-                    } finally {
-                        lock.unlock();
                     }
                 }
             }
