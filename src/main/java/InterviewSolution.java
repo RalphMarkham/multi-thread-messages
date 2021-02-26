@@ -17,6 +17,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class InterviewSolution {
     private final static DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
@@ -27,24 +29,36 @@ public class InterviewSolution {
         try {
             @SuppressWarnings("rawtypes")
             CompletableFuture[] futures = Files.lines(Paths.get(path))
-                    .map(l -> {
-                        int firstIndx = l.indexOf('|');
-                        int lastIndx = l.lastIndexOf('|');
-                        CompletableFuture<Void> cf = CompletableFuture.completedFuture(null);
-                        if(firstIndx > -1 && lastIndx > firstIndx) {
-                            if (firstIndx == 0) {
-                                try {
-                                    Thread.sleep(Integer.parseInt(l.substring(1,lastIndx)));
-                                } catch (InterruptedException e) {
-                                    e.printStackTrace();
-                                }
-                            } else {
-                                cf = es.submit(l.substring(0,firstIndx), new Consumer(l, firstIndx, lastIndx));
+                .parallel()
+                // map each line into a CompletableFuture
+                .map(l -> {
+                    int firstIndx = l.indexOf('|');
+                    int lastIndx = l.lastIndexOf('|');
+                    CompletableFuture<Void> cf = null;
+                    if(firstIndx > -1 && lastIndx > firstIndx) {
+                        if (firstIndx == 0) {
+                            // if message id is not present and processing time is present (|500|)
+                            // then the producer needs to stop producing for 500ms.  This simulates
+                            // a pause in incoming messages.
+
+                            // ensure a valid completed future is provided
+                            cf = CompletableFuture.completedFuture(null);
+                            try {
+                                Thread.sleep(Integer.parseInt(l.substring(1,lastIndx)));
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
                             }
+
+                        } else {
+                            // Because FixedOrderedExecutor / es, maintains the key Runnable Queue pairs,
+                            // which are updated by es and one of its inner classes, just using
+                            // CompletableFuture.runAsync() becomes a little more impractical in this stream.
+                            cf = es.submit(l.substring(0,firstIndx), new Consumer(l, firstIndx, lastIndx));
                         }
-                        return cf;
-                    })
-                    .toArray(CompletableFuture[]::new);
+                    }
+                    return cf;
+                })
+                .toArray(CompletableFuture[]::new);
 
             CompletableFuture.allOf(futures).join();
 
@@ -76,7 +90,7 @@ public class InterviewSolution {
         System.out.printf("%s - END\n", end);
     }
 
-    static class Consumer implements Runnable {
+    private static class Consumer implements Runnable {
 
         private final String line;
         private final Integer firstIndx;
@@ -105,30 +119,25 @@ public class InterviewSolution {
         }
     }
 
-    static class FixedOrderedExecutor<K> implements ExecutorService {
+    /**
+     * All messages with the same id must be processed in the order they appear in the file.
+     *
+     * A simple delegate ExecutorService, extended to support the execution
+     * of key Runnable pairs, ensuring sequential execution based on key.
+     * Key based sequential execution is managed by maintaining a map of key
+     * Runnable Queue pairs. Upon completion the Runnable Queue inner class
+     * removes itself from the map.
+     *
+     * @param <K> the key type
+     */
+    private static class FixedOrderedExecutor<K> implements ExecutorService {
 
-        private final ExecutorService delegate;
-        private final Map<K, Queue<Runnable>> mappedTasks = new HashMap<>();
-
-        public FixedOrderedExecutor(int threads) {
-            delegate = Executors.newFixedThreadPool(threads);
-        }
-
-        public CompletableFuture<Void> submit(K key, Runnable runnable) {
-            RunnableCompletableFuture run = new RunnableCompletableFuture(runnable, new CompletableFuture<>());
-            synchronized (mappedTasks) {
-                Queue<Runnable> queue = mappedTasks.get(key);
-                if (queue != null) {
-                    queue.add(run);
-                } else {
-                    TaskQueue tq = new TaskQueue(key, run);
-                    mappedTasks.put(key, tq);
-                    delegate.execute(tq);
-                }
-            }
-            return run.cf;
-        }
-
+        /**
+         *  A simpler version of AsyncRun from CompletableFuture, used to
+         *  couple the Runnable and CompletableFuture inorder to provide a
+         *  more elegant solution for maintaining a connection to the Runnable
+         *  after it has been submitted.
+         */
         private static class RunnableCompletableFuture implements Runnable {
             private final Runnable r;
             private final CompletableFuture<Void> cf;
@@ -149,6 +158,73 @@ public class InterviewSolution {
                     }
                 }
             }
+        }
+
+        /**
+         * Wrapper ensuring the sequential execution of key Runnable pairs.
+         */
+        private class TaskQueue extends LinkedList<Runnable> implements Runnable {
+            private final K key;
+
+            public TaskQueue(K key, Runnable runnable) {
+                super();
+                this.key = key;
+                this.add(runnable);
+            }
+
+            @Override
+            public void run() {
+                // While we still have a Runnable to run
+                while(!this.isEmpty()) {
+
+                    // Retrieve, remove, and run the head of the list
+                    this.poll().run();
+
+                    try {
+                        lock.lock();
+                        // Make sure we still have a Runnable to run,
+                        // otherwise remove this list from mappedTasks
+                        if (this.isEmpty()) {
+                            mappedTasks.remove(key);
+                        }
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+            }
+        }
+
+        // A lock to synchronize when mappedTasks and it value objects
+        // TaskQueue can be updated and / or created
+        private final Lock lock = new ReentrantLock();
+
+        private final Map<K, Queue<Runnable>> mappedTasks = new HashMap<>();
+        private final ExecutorService delegate;
+
+        public FixedOrderedExecutor(int threads) {
+            delegate = Executors.newFixedThreadPool(threads);
+        }
+
+        public CompletableFuture<Void> submit(K key, Runnable runnable) {
+            // Wrap the runnable with a CompletableFuture
+            RunnableCompletableFuture run = new RunnableCompletableFuture(runnable, new CompletableFuture<>());
+            try {
+                lock.lock();
+                // Search for an existing Queue of Runnable if found, add it to the Queue, otherwise
+                // put the key and a new Runnable Queue, containing run into mappedTasks
+                Queue<Runnable> queue = mappedTasks.get(key);
+                if (queue != null) {
+                    queue.add(run);
+                } else {
+                    TaskQueue tq = new TaskQueue(key, run);
+                    mappedTasks.put(key, tq);
+                    delegate.execute(tq);
+                }
+            } finally {
+                lock.unlock();
+            }
+
+            return run.cf;
         }
 
         @Override
@@ -174,29 +250,6 @@ public class InterviewSolution {
         @Override
         public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
             return delegate.awaitTermination(timeout, unit);
-        }
-
-        class TaskQueue extends LinkedList<Runnable> implements Runnable {
-            private final K key;
-            public TaskQueue(K key, Runnable runnable) {
-                super();
-                this.key = key;
-                this.add(runnable);
-            }
-
-            @Override
-            public void run() {
-                while(!this.isEmpty()) {
-                    this.poll().run();
-                    synchronized (this) {
-                        if (this.isEmpty()) {
-                            synchronized (mappedTasks) {
-                                mappedTasks.remove(key);
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         @Override
