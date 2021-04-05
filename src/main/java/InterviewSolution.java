@@ -4,13 +4,14 @@ import java.nio.file.Paths;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,8 +28,7 @@ public class InterviewSolution {
         FixedOrderedExecutor<String> es = new FixedOrderedExecutor<>(threads);
 
         try {
-            @SuppressWarnings("rawtypes")
-            CompletableFuture[] futures = Files.lines(Paths.get(path))
+            @SuppressWarnings("rawtypes") CompletableFuture[] futures = Files.lines(Paths.get(path))
                 .parallel()
                 // map each line into a CompletableFuture
                 .map(l -> {
@@ -162,25 +162,41 @@ public class InterviewSolution {
 
         /**
          * Wrapper ensuring the sequential execution of key Runnable pairs.
+         *
+         * Under normal circumstances an I would classify this kind inheritance
+         * as an anti-pattern, much better served by composition, as inheritance
+         * does not provide any encapsulation to its super classes, but as a
+         * private inner class, it provides both a simple and effective data structure
+         * encapsulated in the FixedOrderedExecutor class.
          */
         private class TaskQueue extends LinkedList<Runnable> implements Runnable {
             private final K key;
 
             public TaskQueue(K key, Runnable runnable) {
                 super();
+
+                Objects.requireNonNull(runnable, "Everybody knows a Runnable can not be null, please rethink your options");
+
                 this.key = key;
-                this.add(runnable);
+                this.push(runnable);
             }
 
             @Override
             public void run() {
-                // While we still have a Runnable to run
-                while(!this.isEmpty()) {
-
+                // Under normal circumstances, the potential for throwing
+                // a NullPointerException would exclude the use of do while.
+                // But because we know our trusty constructor is verifying
+                // a non-null runnable, do while is a safe bet.
+                //
+                // Do while we still have a Runnable to run
+                do {
                     // Retrieve, remove, and run the head of the list
+                    //noinspection ConstantConditions
                     this.poll().run();
 
-                    // Optimize use of lock
+                    // Optimize use of lock, as running this out side of the
+                    // loop runs the chance that a runnable is added before
+                    // this is remove from mappedTasks.
                     if (this.size() < 1) {
                         // Make sure we still have a Runnable to run,
                         // otherwise remove this list from mappedTasks
@@ -193,7 +209,7 @@ public class InterviewSolution {
                             lock.unlock();
                         }
                     }
-                }
+                } while(!this.isEmpty());
             }
         }
 
@@ -201,7 +217,15 @@ public class InterviewSolution {
         // TaskQueue can be updated and / or created
         private final Lock lock = new ReentrantLock();
 
-        private final Map<K, Queue<Runnable>> mappedTasks = new HashMap<>();
+        // Works just fine with HashMap, use of ConcurrentHashMap purely performance
+        // related.  Like the HashMap, ConcurrentHashMap requires the use of locking
+        // as the multi-threaded behaviour is sort of like disengaging fire suppression
+        // and alarm systems so you can do a marathon bake off, with out the worry of
+        // being interrupted by the sprinklers or fire alarm going off.
+        //
+        // Validation of this can be found, by removing the locking and running the
+        // corresponding unit test.
+        private final Map<K, Queue<Runnable>> mappedTasks = new ConcurrentHashMap<>();
         private final ExecutorService delegate;
 
         public FixedOrderedExecutor(int threads) {
