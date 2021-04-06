@@ -28,8 +28,7 @@ public class InterviewSolution {
         FixedOrderedExecutor<String> es = new FixedOrderedExecutor<>(threads);
 
         try {
-            @SuppressWarnings("rawtypes")
-            CompletableFuture[] futures = Files.lines(Paths.get(path))
+            @SuppressWarnings("rawtypes") CompletableFuture[] futures = Files.lines(Paths.get(path))
                 .parallel()
                 // map each line into a CompletableFuture
                 .map(l -> {
@@ -175,6 +174,9 @@ public class InterviewSolution {
 
             public TaskQueue(K key, Runnable runnable) {
                 super();
+
+                Objects.requireNonNull(runnable, "Everybody knows a Runnable can not be null, please rethink your options");
+
                 this.key = key;
                 this.push(runnable);
             }
@@ -183,8 +185,8 @@ public class InterviewSolution {
             public void run() {
                 // Under normal circumstances, the potential for throwing
                 // a NullPointerException would exclude the use of do while.
-                // But because we validate the user Runnable are non-null,
-                // do while is a safe bet.
+                // But because we know our trusty constructor is verifying
+                // a non-null runnable, do while is a safe bet.
                 //
                 // Do while we still have a Runnable to run
                 do {
@@ -231,9 +233,6 @@ public class InterviewSolution {
         }
 
         public CompletableFuture<Void> submit(K key, Runnable runnable) {
-            // user data validation - thankfully we only want a non-null runnable
-            Objects.requireNonNull(runnable, "Everybody knows a Runnable can not be null, please rethink your options");
-
             // Wrap the runnable with a CompletableFuture
             RunnableCompletableFuture run = new RunnableCompletableFuture(runnable, new CompletableFuture<>());
             try {
