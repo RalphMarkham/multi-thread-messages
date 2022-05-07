@@ -4,6 +4,7 @@ import java.nio.file.Paths;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -11,7 +12,6 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,7 +22,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class InterviewSolution {
-    private final static DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     private static void run(int threads, String path) {
         FixedOrderedExecutor<String> es = new FixedOrderedExecutor<>(threads);
@@ -83,11 +83,11 @@ public class InterviewSolution {
         int threadCount = Integer.parseInt(args[0]);
         String path = args[1];
 
-        System.out.printf("%s - STARTING - Consumers: %d;\tFile: %s\n", start, threadCount, path);
+        System.out.printf("%s - STARTING - Consumers: %d;\tFile: %s%n", start, threadCount, path);
         run(threadCount, path);
 
         String end = DATE_TIME_FORMATTER.format(LocalTime.now());
-        System.out.printf("%s - END\n", end);
+        System.out.printf("%s - END%n", end);
     }
 
     private static class Consumer implements Runnable {
@@ -211,21 +211,28 @@ public class InterviewSolution {
                     }
                 } while(!this.isEmpty());
             }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                if (!super.equals(o)) return false;
+                TaskQueue taskQueue = (TaskQueue) o;
+                return key.equals(taskQueue.key);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(super.hashCode(), key);
+            }
         }
 
         // A lock to synchronize when mappedTasks and it value objects
-        // TaskQueue can be updated and / or created
         private final Lock lock = new ReentrantLock();
 
-        // Works just fine with HashMap, use of ConcurrentHashMap purely performance
-        // related.  Like the HashMap, ConcurrentHashMap requires the use of locking
-        // as the multi-threaded behaviour is sort of like disengaging fire suppression
-        // and alarm systems so you can do a marathon bake off, with out the worry of
-        // being interrupted by the sprinklers or fire alarm going off.
-        //
-        // Validation of this can be found, by removing the locking and running the
-        // corresponding unit test.
-        private final Map<K, Queue<Runnable>> mappedTasks = new ConcurrentHashMap<>();
+
+        // Sequential execution of key based lists requires fail fast concurrent behaviour
+        private final Map<K, Queue<Runnable>> mappedTasks = new HashMap<>();
         private final ExecutorService delegate;
 
         public FixedOrderedExecutor(int threads) {
