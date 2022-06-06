@@ -1,43 +1,46 @@
+import ca.ralphsplace.concurrency.SeqMultiValueMapScheduler;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 
 public class InterviewSolution {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     private static void run(int threads, String path) {
-        BiFunctionFixedOrderedExecutor<String> func = new BiFunctionFixedOrderedExecutor<>(threads);
+        var scheduler = new SeqMultiValueMapScheduler<>(threads);
 
         try {
-            @SuppressWarnings("rawtypes") CompletableFuture[] futures = Files.lines(Paths.get(path))
-                .parallel()
+            var futures = Files.lines(Paths.get(path)) // NOSONAR: maybe sonar and Oracle can sit down and talk this out.
+                .parallel() // nothing breaks thread safety quite like threads spawning threads
                 // map each line into a CompletableFuture
                 .map(l -> {
-                    int firstIndx = l.indexOf('|');
-                    int lastIndx = l.lastIndexOf('|');
-                    CompletableFuture<Void> cf = null;
+                    var firstIndx = l.indexOf('|');
+                    var lastIndx = l.lastIndexOf('|');
+
+                    CompletableFuture<String> cf = null;
                     if(firstIndx > -1 && lastIndx > firstIndx) {
                         if (firstIndx == 0) {
+                            // Simulate a pause in message stream
+                            //
                             // if message id is not present and processing time is present (|500|)
-                            // then the producer needs to stop producing for 500ms.  This simulates
-                            // a pause in incoming messages.
+                            // then the producer needs to stop producing for 500ms.
 
                             // ensure a valid completed future is provided
+                            // would have preferred new Void() over null
                             cf = CompletableFuture.completedFuture(null);
                             try {
-                                Thread.sleep(Integer.parseInt(l.substring(1,lastIndx)));
+                                Thread.sleep(Integer.parseInt(l.substring(1,lastIndx)));//NOSONAR
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
                             }
-
                         } else {
-                            // Because FixedOrderedExecutor / es, maintains the key Runnable Queue pairs,
-                            // which are updated by es and one of its inner classes, just using
-                            // CompletableFuture.runAsync() becomes a little more impractical in this stream.
-                            cf = func.apply(() -> l.substring(0,firstIndx), new Consumer(l, firstIndx, lastIndx));
+                            // Process Line.
+                            cf = scheduler.submit(l.substring(0,firstIndx), new LineProcessor(l, firstIndx, lastIndx));
                         }
                     }
                     return cf;
@@ -49,7 +52,7 @@ public class InterviewSolution {
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
-            func.shutdown();
+            scheduler.shutdown();
         }
     }
 
@@ -74,32 +77,34 @@ public class InterviewSolution {
         System.out.printf("%s - END%n", end);
     }
 
-    private static class Consumer implements Runnable {
+    private static class LineProcessor implements Callable<String> {
 
         private final String line;
         private final Integer firstIndx;
         private final Integer lastIndx;
 
-        public Consumer(String line, Integer firstIndx, Integer lastIndx) {
+        public LineProcessor(String line, Integer firstIndx, Integer lastIndx) {
             this.line = line;
             this.firstIndx = firstIndx;
             this.lastIndx = lastIndx;
         }
 
         @Override
-        public void run() {
+        public String call() {
             String start = DATE_TIME_FORMATTER.format(LocalTime.now());
             int sleepDuration = Integer.parseInt(line.substring(firstIndx+1,lastIndx));
             long threadId = Thread.currentThread().getId();
 
             try {
-                Thread.sleep(sleepDuration);
+                Thread.sleep(sleepDuration);//NOSONAR
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
 
             String end = DATE_TIME_FORMATTER.format(LocalTime.now());
             System.out.println(line+";  \tThread: "+threadId+";\tStart: "+start+";\tEnd: "+end);
+
+            return line;
         }
     }
 }
