@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.util.stream.Collectors;
 
 
 class InterviewSolutionTest {
@@ -30,7 +31,7 @@ class InterviewSolutionTest {
         String[] args = {"5","multi_thread_messages.txt"};
         InterviewSolution.main(args);
 
-        long count = outContent.toString()
+        var keyThreadIdList = outContent.toString()
                 .lines()
                 .filter(s -> s.contains("Thread: "))
                 .sorted()
@@ -40,7 +41,7 @@ class InterviewSolutionTest {
                 })
                 .distinct()
                 .peek(System.err::println)
-                .count();
+                .collect(Collectors.toUnmodifiableList());
 
         // Expecting:
         // 1) A##
@@ -50,6 +51,8 @@ class InterviewSolutionTest {
         // 5) E##
         // 6) Z##
 
-        Assertions.assertEquals(6, count);
+
+
+        Assertions.assertEquals(Integer.parseInt("6"), keyThreadIdList.size());
     }
 }
