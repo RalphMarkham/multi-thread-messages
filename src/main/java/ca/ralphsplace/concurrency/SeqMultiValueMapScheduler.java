@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -20,7 +19,7 @@ public final class SeqMultiValueMapScheduler<K> {
 
 
     // Sequential execution of key based lists requires fail fast concurrent behaviour
-    private final Map<K, Queue<Runnable>> mappedTasks = new HashMap<>();
+    private final Map<K, SimpleQueue<Runnable>> mappedTasks = new HashMap<>();
     private final ExecutorService exeSrv;
 
     public SeqMultiValueMapScheduler(int threads) {
@@ -83,25 +82,24 @@ public final class SeqMultiValueMapScheduler<K> {
     }
 
     /**
-     * Wrapper ensuring the sequential execution of key Runnable pairs.
+     * composition = No Serialization
      *
-     * Under normal circumstances I would classify this kind inheritance
-     * as an anti pattern, much better served by composition, as inheritance
-     * does not provide any encapsulation to its super classes, but as a
-     * private inner class, it provides both a simple and effective data structure
-     * encapsulated in the ca.ralphsplace.concurrency.SeqMultiValueMapScheduler class.
+     * New feature suggestion for Java - inheritance with exclusions.
+     *
+     * Example: TaskQueue extends LinkedList<Runnable> excludes java.io.Serializable implements Runnable
      *
      */
-    private class TaskQueue extends LinkedList<Runnable> implements Runnable { //NOSONAR
-        private final transient K key;
+    private class TaskQueue implements SimpleQueue<Runnable>, Runnable {
+        private volatile K key;
+        private final LinkedList<Runnable> delegate;
 
         public TaskQueue(K key, Runnable runnable) {
-            super();
 
             Objects.requireNonNull(runnable, "Everybody knows a Runnable can not be null, please rethink your options");
 
             this.key = key;
-            this.push(runnable);
+            delegate = new LinkedList<Runnable>();
+            delegate.push(runnable);
         }
 
         @Override
@@ -148,5 +146,32 @@ public final class SeqMultiValueMapScheduler<K> {
         public int hashCode() {
             return Objects.hash(super.hashCode(), key);
         }
+
+        @Override
+        public Runnable poll() {
+            return delegate.poll();
+        }
+
+        @Override
+        public void add(Runnable value) {
+            delegate.add(value);
+        }
+
+        @Override
+        public int size() {
+            return delegate.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return delegate.isEmpty();
+        }
+    }
+
+    static interface SimpleQueue<T> {
+        T poll();
+        void add(T value);
+        int size();
+        boolean isEmpty();
     }
 }
