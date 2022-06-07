@@ -15,6 +15,7 @@ public class InterviewSolution {
         var scheduler = new SeqMultiValueMapScheduler<>(threads);
 
         try {
+            //noinspection resource
             var futures = Files.lines(Paths.get(path)) // NOSONAR: maybe sonar and Oracle can sit down and talk this out.
                 .parallel() // nothing breaks thread safety quite like threads spawning threads
                 // map each line into a CompletableFuture

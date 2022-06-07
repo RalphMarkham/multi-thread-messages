@@ -1,9 +1,13 @@
 package ca.ralphsplace.concurrency;
 
+import java.io.IOException;
+import java.io.ObjectStreamException;
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -19,10 +23,11 @@ public final class SeqMultiValueMapScheduler<K> {
 
 
     // Sequential execution of key based lists requires fail fast concurrent behaviour
-    private final Map<K, SimpleQueue<Runnable>> mappedTasks = new HashMap<>();
+    private final Map<K, Queue<Runnable>> mappedTasks;
     private final ExecutorService exeSrv;
 
     public SeqMultiValueMapScheduler(int threads) {
+        mappedTasks = new HashMap<>(threads);
         exeSrv = Executors.newFixedThreadPool(threads);
     }
 
@@ -81,25 +86,15 @@ public final class SeqMultiValueMapScheduler<K> {
         }
     }
 
-    /**
-     * composition = No Serialization
-     *
-     * New feature suggestion for Java - inheritance with exclusions.
-     *
-     * Example: TaskQueue extends LinkedList<Runnable> excludes java.io.Serializable implements Runnable
-     *
-     */
-    private class TaskQueue implements SimpleQueue<Runnable>, Runnable {
-        private volatile K key;
-        private final LinkedList<Runnable> delegate;
+    private class TaskQueue extends LinkedList<Runnable> implements Runnable, NotSerializable {
+        private final K key; //NOSONAR
 
         public TaskQueue(K key, Runnable runnable) {
 
             Objects.requireNonNull(runnable, "Everybody knows a Runnable can not be null, please rethink your options");
 
             this.key = key;
-            delegate = new LinkedList<Runnable>();
-            delegate.push(runnable);
+            this.push(runnable);
         }
 
         @Override
@@ -146,32 +141,27 @@ public final class SeqMultiValueMapScheduler<K> {
         public int hashCode() {
             return Objects.hash(super.hashCode(), key);
         }
-
-        @Override
-        public Runnable poll() {
-            return delegate.poll();
-        }
-
-        @Override
-        public void add(Runnable value) {
-            delegate.add(value);
-        }
-
-        @Override
-        public int size() {
-            return delegate.size();
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return delegate.isEmpty();
-        }
     }
 
-    static interface SimpleQueue<T> {
-        T poll();
-        void add(T value);
-        int size();
-        boolean isEmpty();
+    private interface NotSerializable extends Serializable {
+        String MESSAGE = "Serializing a runnable is beyond the scope of this ...";
+
+        long serialVersionUID = 42L;
+
+        default Object readResolve() throws ObjectStreamException {
+            throw new UnsupportedOperationException(MESSAGE);
+        }
+        default Object writeReplace() throws ObjectStreamException {
+            throw new UnsupportedOperationException(MESSAGE);
+        }
+        private void writeObject(java.io.ObjectOutputStream out) throws IOException {
+            throw new UnsupportedOperationException(MESSAGE);
+        }
+        private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {
+            throw new UnsupportedOperationException(MESSAGE);
+        }
+        private void readObjectNoData() throws ObjectStreamException {
+            throw new UnsupportedOperationException(MESSAGE);
+        }
     }
 }
